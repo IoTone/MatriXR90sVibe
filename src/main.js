@@ -8,6 +8,15 @@ import { ChatPanel } from './ui/chat-panel.js';
 import { KeyboardPanel } from './ui/keyboard-panel.js';
 import { renderer } from './xr/setup.js';
 
+// --- Prefill login form from env ---
+const homeserverInput = document.getElementById('homeserver');
+const usernameInput = document.getElementById('username');
+const passwordInput = document.getElementById('password');
+
+if (import.meta.env.VITE_HOMESERVER) homeserverInput.value = import.meta.env.VITE_HOMESERVER;
+if (import.meta.env.VITE_USERNAME) usernameInput.value = import.meta.env.VITE_USERNAME;
+if (import.meta.env.VITE_PASSWORD) passwordInput.value = import.meta.env.VITE_PASSWORD;
+
 // --- Login form ---
 const loginForm = document.getElementById('login-form');
 const loginStatus = document.getElementById('login-status');
