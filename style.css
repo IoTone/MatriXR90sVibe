@@ -1,0 +1,119 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #111;
+  color: #eee;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#login-screen {
+  text-align: center;
+  max-width: 360px;
+  width: 100%;
+  padding: 2rem;
+}
+
+#login-screen h1 {
+  margin-bottom: 1.5rem;
+  font-size: 1.6rem;
+}
+
+#login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#login-form input {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #222;
+  color: #eee;
+  font-size: 1rem;
+}
+
+#login-form button {
+  padding: 0.7rem;
+  border: none;
+  border-radius: 6px;
+  background: #4a9eff;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+#login-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#login-status {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: #aaa;
+}
+
+#ar-button-container {
+  margin-top: 1rem;
+}
+
+#ar-button-container button {
+  padding: 0.8rem 1.6rem;
+  border: none;
+  border-radius: 8px;
+  background: #00c853;
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+/* DOM overlay — visible only during XR session */
+#dom-overlay {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+}
+
+#dom-overlay.active {
+  display: flex;
+}
+
+#overlay-input-bar {
+  display: flex;
+  width: 100%;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  gap: 8px;
+}
+
+#overlay-input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #222;
+  color: #fff;
+  font-size: 16px;
+}
+
+#overlay-send {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #4a9eff;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}

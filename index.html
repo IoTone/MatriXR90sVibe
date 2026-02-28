@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AR Matrix Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="login-screen">
+    <h1>AR Matrix Chat</h1>
+    <form id="login-form">
+      <input type="url" id="homeserver" value="https://t.rt.tl" placeholder="Homeserver URL" required />
+      <input type="text" id="username" placeholder="Username" required />
+      <input type="password" id="password" placeholder="Password" required />
+      <button type="submit" id="login-btn">Login</button>
+      <p id="login-status"></p>
+    </form>
+    <div id="ar-button-container"></div>
+  </div>
+
+  <div id="dom-overlay">
+    <div id="overlay-input-bar">
+      <input type="text" id="overlay-input" placeholder="Type a message…" />
+      <button id="overlay-send">Send</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

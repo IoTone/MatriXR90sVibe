@@ -1,0 +1,20 @@
+{
+  "name": "ar-matrix-chat",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "matrix-js-sdk": "^34.0.0",
+    "three": "^0.170.0",
+    "troika-three-text": "^0.52.3"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "@vitejs/plugin-basic-ssl": "^2.0.0"
+  }
+}
