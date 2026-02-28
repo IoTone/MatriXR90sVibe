@@ -96,34 +96,60 @@ async function fetchRoomType(roomId) {
 export async function loadSpaces() {
   if (!accessToken) return;
 
-  // Get all joined rooms directly from the server
+  // 1. Get joined rooms
   const { joined_rooms } = await matrixFetch('/_matrix/client/v3/joined_rooms');
   console.log(`[matrix] Server reports ${joined_rooms.length} joined rooms`);
 
-  // Fetch name + type for each room in parallel
-  const roomInfos = await Promise.all(
+  const joinedInfos = await Promise.all(
     joined_rooms.map(async (roomId) => {
       const [name, type] = await Promise.all([fetchRoomName(roomId), fetchRoomType(roomId)]);
       return { id: roomId, name, type };
     })
   );
 
-  const spaces = roomInfos.filter((r) => r.type === 'm.space');
-  const rooms = roomInfos.filter((r) => r.type !== 'm.space');
+  const joinedSpaces = joinedInfos.filter((r) => r.type === 'm.space');
+  const joinedRooms = joinedInfos.filter((r) => r.type !== 'm.space');
 
-  // Log for debugging
-  spaces.forEach((s) => console.log(`[matrix] space: ${s.name} (${s.id})`));
-  rooms.forEach((r) => console.log(`[matrix] room: ${r.name} (${r.id})`));
+  joinedSpaces.forEach((s) => console.log(`[matrix] joined space: ${s.name} (${s.id})`));
+  joinedRooms.forEach((r) => console.log(`[matrix] joined room: ${r.name} (${r.id})`));
 
-  // Always include "All Rooms" virtual entry first
+  // 2. Fetch public room directory to find browsable spaces
+  let publicSpaces = [];
+  try {
+    const dir = await matrixFetch('/_matrix/client/v3/publicRooms');
+    const publicEntries = dir.chunk || [];
+    publicSpaces = publicEntries
+      .filter((r) => r.room_type === 'm.space')
+      .map((r) => ({ id: r.room_id, name: r.name || r.room_id }));
+    const publicRooms = publicEntries
+      .filter((r) => r.room_type !== 'm.space');
+    console.log(`[matrix] Public directory: ${publicEntries.length} entries, ${publicSpaces.length} spaces, ${publicRooms.length} rooms`);
+    publicSpaces.forEach((s) => console.log(`[matrix] public space: ${s.name} (${s.id})`));
+  } catch (err) {
+    console.warn('[matrix] Could not fetch public rooms:', err);
+  }
+
+  // 3. Merge: joined spaces + public spaces (deduplicated)
+  const seenIds = new Set();
+  const allSpaces = [];
+  for (const s of [...joinedSpaces, ...publicSpaces]) {
+    if (!seenIds.has(s.id)) {
+      seenIds.add(s.id);
+      allSpaces.push({ id: s.id, name: s.name });
+    }
+  }
+
   const spaceList = [
     { id: '__all__', name: 'All Rooms' },
-    ...spaces.map((s) => ({ id: s.id, name: s.name })),
+    ...allSpaces,
   ];
   store.set('spaces', spaceList);
 
-  // Stash full room list for "All Rooms" selection
-  store.set('_allRooms', rooms.map((r) => ({ id: r.id, name: r.name })));
+  // Stash joined (non-space) rooms for "All Rooms"
+  store.set('_allRooms', joinedRooms.map((r) => ({ id: r.id, name: r.name })));
+
+  // Auto-select "All Rooms" so the user immediately sees their joined rooms
+  selectSpace('__all__');
 }
 
 export async function selectSpace(spaceId) {
@@ -154,23 +180,39 @@ export async function selectSpace(spaceId) {
 export async function selectRoom(roomId) {
   if (!matrixClient) return;
   store.set('selectedRoomId', roomId);
+  store.set('messages', []);
 
-  const room = matrixClient.getRoom(roomId);
-  if (!room) {
-    store.set('messages', []);
-    return;
+  // Join the room if we're not already a member
+  try {
+    const room = matrixClient.getRoom(roomId);
+    const membership = room?.getMyMembership?.();
+    if (membership !== 'join') {
+      console.log(`[matrix] Joining room ${roomId}…`);
+      await matrixClient.joinRoom(roomId);
+      console.log(`[matrix] Joined ${roomId}`);
+    }
+  } catch (err) {
+    console.error(`[matrix] Failed to join room ${roomId}:`, err);
   }
 
-  const timeline = room.getLiveTimeline().getEvents();
-  const messages = timeline
-    .filter((e) => e.getType() === 'm.room.message')
-    .slice(-30)
-    .map((e) => ({
-      sender: e.getSender(),
-      body: e.getContent().body || '',
-      ts: e.getTs(),
-    }));
-  store.set('messages', messages);
+  // Fetch recent messages via the API (works even if SDK cache is empty)
+  try {
+    const data = await matrixFetch(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=30`
+    );
+    const messages = (data.chunk || [])
+      .filter((e) => e.type === 'm.room.message')
+      .map((e) => ({
+        sender: e.sender,
+        body: e.content?.body || '',
+        ts: e.origin_server_ts,
+      }))
+      .reverse(); // API returns newest-first with dir=b, we want chronological
+    console.log(`[matrix] Loaded ${messages.length} messages from ${roomId}`);
+    store.set('messages', messages);
+  } catch (err) {
+    console.error(`[matrix] Failed to load messages for ${roomId}:`, err);
+  }
 }
 
 function listenForMessages() {
@@ -193,10 +235,24 @@ export async function sendMessage(text) {
   const roomId = store.get('selectedRoomId');
   if (!matrixClient || !roomId) return;
 
-  await matrixClient.sendMessage(roomId, {
-    msgtype: 'm.text',
-    body: text,
-  });
+  // Use the API directly to send — avoids SDK cache issues
+  try {
+    const txnId = `m${Date.now()}`;
+    await matrixFetch(
+      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`
+    ).catch(() => null); // ignore GET — we need PUT
+
+    await fetch(`${resolvedBaseUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ msgtype: 'm.text', body: text }),
+    });
+  } catch (err) {
+    console.error('[matrix] Failed to send message:', err);
+  }
 }
 
 export function getClient() {
