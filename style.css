@@ -210,7 +210,11 @@ body {
 }
 
 #ar-button-container {
-  margin-top: 1.5rem;
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
 }
 
 #ar-button-container button {

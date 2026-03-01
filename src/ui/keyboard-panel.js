@@ -12,7 +12,7 @@ const ROWS = [
   ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
   ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
   ['Z', 'X', 'C', 'V', 'B', 'N', 'M', 'DEL'],
-  ['SPACE', 'SEND'],
+  ['SPACE', 'CLR', 'SEND'],
 ];
 
 export class KeyboardPanel extends Panel {
@@ -65,7 +65,8 @@ export class KeyboardPanel extends Panel {
   }
 
   #keyWidth(key, base) {
-    if (key === 'SPACE') return base * 4;
+    if (key === 'SPACE') return base * 3;
+    if (key === 'CLR') return base * 1.5;
     if (key === 'SEND') return base * 2.5;
     if (key === 'DEL') return base * 1.5;
     return base;
@@ -74,6 +75,8 @@ export class KeyboardPanel extends Panel {
   #onKey(key) {
     if (key === 'DEL') {
       this.#buffer = this.#buffer.slice(0, -1);
+    } else if (key === 'CLR') {
+      this.#buffer = '';
     } else if (key === 'SPACE') {
       this.#buffer += ' ';
     } else if (key === 'SEND') {

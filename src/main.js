@@ -39,10 +39,11 @@ loginForm.addEventListener('submit', async (e) => {
   try {
     await login(homeserver, username, password);
     loginStatus.textContent = 'Synced! Ready for AR.';
-    // Trigger glitch fade-out animation
-    document.getElementById('login-screen').classList.add('fade-out');
+    // Trigger glitch fade-out animation on the login screen
+    const loginScreen = document.getElementById('login-screen');
+    loginScreen.classList.add('fade-out');
     setTimeout(() => {
-      loginForm.style.display = 'none';
+      loginScreen.style.display = 'none';
       setupAR();
     }, 1000);
   } catch (err) {
@@ -72,7 +73,7 @@ overlayInput.addEventListener('keydown', (e) => {
 // --- AR setup ---
 function setupAR() {
   initThree();
-  const arButton = createARButton();
+  createARButton();
   initInput(renderer, scene, camera);
 
   const panels = [];
@@ -89,8 +90,10 @@ function setupAR() {
     if (session) session.end().catch(() => {});
     // Remove all panels from scene
     teardownPanels();
-    // Show login form again
-    loginForm.style.display = '';
+    // Show login screen again
+    const loginScreen = document.getElementById('login-screen');
+    loginScreen.style.display = '';
+    loginScreen.classList.remove('fade-out');
     loginBtn.disabled = false;
     loginStatus.textContent = 'Logged out.';
   }
