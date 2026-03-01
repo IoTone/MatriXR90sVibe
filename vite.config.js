@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
-const MATRIX_BACKEND = 'https://matrix.t.rt.tl';
+const MATRIX_BACKEND = 'https://matrix.org';
 
 export default defineConfig({
   plugins: [basicSsl()],
