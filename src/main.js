@@ -10,7 +10,9 @@ import { RoomPanel } from './ui/room-panel.js';
 import { ChatPanel } from './ui/chat-panel.js';
 import { KeyboardPanel } from './ui/keyboard-panel.js';
 import { UserPanel } from './ui/user-panel.js';
+import { AboutPanel } from './ui/about-panel.js';
 import { renderer } from './xr/setup.js';
+import { version } from '../package.json';
 
 // --- Prefill login form from env ---
 const homeserverInput = document.getElementById('homeserver');
@@ -20,6 +22,8 @@ const passwordInput = document.getElementById('password');
 if (import.meta.env.VITE_HOMESERVER) homeserverInput.value = import.meta.env.VITE_HOMESERVER;
 if (import.meta.env.VITE_USERNAME) usernameInput.value = import.meta.env.VITE_USERNAME;
 if (import.meta.env.VITE_PASSWORD) passwordInput.value = import.meta.env.VITE_PASSWORD;
+
+document.getElementById('app-version').textContent = `v${version}`;
 
 // --- Login form ---
 const loginForm = document.getElementById('login-form');
@@ -104,6 +108,7 @@ function setupAR() {
   const chatPanel = new ChatPanel();
   const keyboardPanel = new KeyboardPanel();
   const userPanel = new UserPanel(handleLogout);
+  const aboutPanel = new AboutPanel(version);
 
   // Position panels relative to headset origin (y=0 is eye level on most headsets)
   // Slightly below eye level so user looks down comfortably
@@ -131,12 +136,17 @@ function setupAR() {
   userPanel.position.set(0.9, panelY, -1.5);
   userPanel.rotation.y = -0.35;
 
+  // About panel — below user panel
+  aboutPanel.position.set(0.9, panelY - 0.35, -1.5);
+  aboutPanel.rotation.y = -0.35;
+
   scene.add(spacePanel);
   scene.add(roomPanel);
   scene.add(chatPanel);
   scene.add(keyboardPanel);
   scene.add(userPanel);
-  panels.push(spacePanel, roomPanel, chatPanel, keyboardPanel, userPanel);
+  scene.add(aboutPanel);
+  panels.push(spacePanel, roomPanel, chatPanel, keyboardPanel, userPanel, aboutPanel);
 
   // Debug logging
   store.on('spaces', (spaces) => console.log('Spaces:', spaces));
