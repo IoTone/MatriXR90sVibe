@@ -5,7 +5,7 @@ import { createClient, ClientEvent, RoomEvent } from 'matrix-js-sdk';
 import { store } from '../state/store.js';
 import { playMessageNotification } from '../ui/notification.js';
 
-const DEFAULT_HOMESERVER = import.meta.env.VITE_HOMESERVER || 'https://t.rt.tl';
+const DEFAULT_HOMESERVER = import.meta.env.VITE_HOMESERVER || 'https://matrix.org';
 
 let matrixClient = null;
 let resolvedBaseUrl = null;

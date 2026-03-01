@@ -3,7 +3,7 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const MATRIX_BACKEND = env.VITE_MATRIX_BACKEND || 'https://matrix.t.rt.tl';
+  const MATRIX_BACKEND = env.VITE_MATRIX_BACKEND || 'https://matrix-client.matrix.org';
 
   return {
     plugins: [basicSsl()],
