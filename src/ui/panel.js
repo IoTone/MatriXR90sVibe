@@ -113,9 +113,13 @@ export class Panel extends THREE.Group {
     }
 
     // --- Neon border around entire panel ---
+    this._borderGroup = new THREE.Group();
+    this.add(this._borderGroup);
     this._buildNeonBorder(width, height);
 
     // Scanline overlay
+    this._scanlineGroup = new THREE.Group();
+    this.add(this._scanlineGroup);
     this._buildScanlines(width, height);
 
     // Content container — starts below title bar
@@ -133,7 +137,8 @@ export class Panel extends THREE.Group {
   }
 
   _buildResizeHandles(w, h) {
-    const size = 0.025;
+    const size = 0.04;
+    const bracketLen = 0.025;
     const corners = [
       { key: 'tl', x: -w / 2, y: h / 2 },
       { key: 'tr', x: w / 2, y: h / 2 },
@@ -141,35 +146,80 @@ export class Panel extends THREE.Group {
       { key: 'br', x: w / 2, y: -h / 2 },
     ];
     for (const c of corners) {
+      // Invisible hit area — large enough to grab
       const geo = new THREE.PlaneGeometry(size, size);
       const mat = new THREE.MeshBasicMaterial({
         color: this.neonColor,
         transparent: true,
         opacity: 0.0,
+        side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(c.x, c.y, 0.004);
+      mesh.position.set(c.x, c.y, 0.012);
       mesh.userData.isResizeHandle = true;
       mesh.userData.corner = c.key;
       mesh.userData.panel = this;
-      mesh.userData.onHoverStart = () => { mat.opacity = 0.6; };
-      mesh.userData.onHoverEnd = () => { mat.opacity = 0.0; };
+
+      // Corner bracket lines (L-shaped indicator)
+      const sx = (c.key === 'tr' || c.key === 'br') ? -1 : 1;
+      const sy = (c.key === 'bl' || c.key === 'br') ? 1 : -1;
+      const bracketPts = [
+        new THREE.Vector3(0, sy * -bracketLen, 0),
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(sx * bracketLen, 0, 0),
+      ];
+      const bracketMat = new THREE.LineBasicMaterial({
+        color: this.neonColor, transparent: true, opacity: 0.4,
+      });
+      const bracket = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(bracketPts),
+        bracketMat
+      );
+      bracket.position.z = 0.001;
+      mesh.add(bracket);
+
+      mesh.userData.onHoverStart = () => {
+        mat.opacity = 0.3;
+        bracketMat.opacity = 1.0;
+        bracketMat.color.setHex(0xffffff);
+      };
+      mesh.userData.onHoverEnd = () => {
+        mat.opacity = 0.0;
+        bracketMat.opacity = 0.4;
+        bracketMat.color.setHex(this.neonColor);
+      };
+
       this.add(mesh);
       registerInteractable(mesh);
       this._resizeHandles.push(mesh);
     }
   }
 
-  resize(newWidth, newHeight) {
-    // Remove old resize handles
+  _removeResizeHandles() {
     for (const h of this._resizeHandles) {
       unregisterInteractable(h);
       this.remove(h);
-      h.geometry.dispose();
-      h.material.dispose();
+      h.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      });
     }
     this._resizeHandles = [];
+  }
 
+  _clearGroup(group) {
+    while (group.children.length > 0) {
+      const child = group.children[0];
+      group.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
+        else child.material.dispose();
+      }
+    }
+  }
+
+  resize(newWidth, newHeight) {
     this.panelWidth = newWidth;
     this.panelHeight = newHeight;
 
@@ -185,23 +235,50 @@ export class Panel extends THREE.Group {
     this.dragHandle.geometry = new THREE.PlaneGeometry(newWidth, HANDLE_HEIGHT);
     this.dragHandle.position.set(0, newHeight / 2 - HANDLE_HEIGHT / 2, 0.005);
 
+    // Update handle border lines
+    const handleY = this.dragHandle.position.y;
+    // We can't easily update existing line geometries, but they're thin —
+    // just reposition the handle dots to match new width
+    this._handleDots.forEach((dot, idx) => {
+      const side = idx < 3 ? -1 : 1;
+      const j = idx % 3;
+      dot.position.set(
+        side * (newWidth / 2 - 0.025 - j * 0.014),
+        handleY,
+        0.007
+      );
+    });
+
     // Update title position
     if (this.titleText) {
       this.titleText.position.set(0, this.dragHandle.position.y, 0.008);
     }
 
-    // Update content container position
+    // Update content container position (preserve children!)
     this.content.position.set(
       -newWidth / 2 + 0.02,
       newHeight / 2 - HANDLE_HEIGHT - 0.015,
       0.003
     );
 
+    // Rebuild neon border
+    this._clearGroup(this._borderGroup);
+    this._buildNeonBorder(newWidth, newHeight);
+
+    // Rebuild scanlines
+    this._clearGroup(this._scanlineGroup);
+    this._buildScanlines(newWidth, newHeight);
+
     // Rebuild resize handles
+    this._removeResizeHandles();
     this._buildResizeHandles(newWidth, newHeight);
+
+    // Notify subclasses to re-layout content
+    this.onResize?.(newWidth, newHeight);
   }
 
   _buildNeonBorder(w, h) {
+    const g = this._borderGroup;
     const corners = [
       new THREE.Vector3(-w / 2, -h / 2, 0),
       new THREE.Vector3(w / 2, -h / 2, 0),
@@ -213,7 +290,7 @@ export class Panel extends THREE.Group {
     const outerGeom = new THREE.BufferGeometry().setFromPoints(corners);
 
     // Outer glow
-    this.add(new THREE.Line(outerGeom, new THREE.LineBasicMaterial({
+    g.add(new THREE.Line(outerGeom, new THREE.LineBasicMaterial({
       color: this.neonColor, transparent: true, opacity: 0.3,
     })));
 
@@ -222,14 +299,14 @@ export class Panel extends THREE.Group {
       color: this.neonColor, transparent: true, opacity: 0.6,
     }));
     mid.position.z = 0.001;
-    this.add(mid);
+    g.add(mid);
 
     // Inner bright core
     const inner = new THREE.Line(outerGeom.clone(), new THREE.LineBasicMaterial({
       color: 0xffffff, transparent: true, opacity: 0.9,
     }));
     inner.position.z = 0.002;
-    this.add(inner);
+    g.add(inner);
 
     // Corner accents
     const cSize = 0.015;
@@ -240,11 +317,12 @@ export class Panel extends THREE.Group {
     for (const [cx, cy] of [[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2]]) {
       const dot = new THREE.Mesh(cGeo.clone(), cMat.clone());
       dot.position.set(cx, cy, 0.003);
-      this.add(dot);
+      g.add(dot);
     }
   }
 
   _buildScanlines(w, h) {
+    const g = this._scanlineGroup;
     const count = Math.floor(h / 0.008);
     const positions = [];
     for (let i = 0; i < count; i++) {
@@ -253,7 +331,7 @@ export class Panel extends THREE.Group {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    this.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+    g.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
       color: this.neonColor, transparent: true, opacity: 0.04,
     })));
   }

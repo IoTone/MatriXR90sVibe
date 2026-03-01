@@ -277,18 +277,27 @@ export function updateInput(renderer, frame) {
         }
         if (handResizeStates[i]) {
           const rs = handResizeStates[i];
-          const delta = new THREE.Vector3().subVectors(_pinchMid, rs.startPinch);
-          // Scale factor based on corner
+          // Compute delta in panel's local space so rotation is accounted for
+          const worldDelta = new THREE.Vector3().subVectors(_pinchMid, rs.startPinch);
+          const invMatrix = new THREE.Matrix4().copy(rs.panel.matrixWorld).invert();
+          const localDelta = worldDelta.clone().transformDirection(invMatrix);
+
           let newW = rs.startWidth;
           let newH = rs.startHeight;
-          if (rs.corner === 'br' || rs.corner === 'tr') newW += delta.x * 2;
-          if (rs.corner === 'bl' || rs.corner === 'tl') newW -= delta.x * 2;
-          if (rs.corner === 'tr' || rs.corner === 'tl') newH += delta.y * 2;
-          if (rs.corner === 'br' || rs.corner === 'bl') newH -= delta.y * 2;
-          // Clamp to reasonable sizes
+          if (rs.corner === 'br' || rs.corner === 'tr') newW += localDelta.x * 2;
+          if (rs.corner === 'bl' || rs.corner === 'tl') newW -= localDelta.x * 2;
+          if (rs.corner === 'tr' || rs.corner === 'tl') newH += localDelta.y * 2;
+          if (rs.corner === 'br' || rs.corner === 'bl') newH -= localDelta.y * 2;
           newW = Math.max(0.15, Math.min(1.5, newW));
           newH = Math.max(0.1, Math.min(1.5, newH));
-          if (rs.panel.resize) rs.panel.resize(newW, newH);
+          // Store pending size; throttle actual resize to avoid per-frame rebuilds
+          rs.pendingW = newW;
+          rs.pendingH = newH;
+          const now = performance.now();
+          if (!rs.lastResize || now - rs.lastResize > 150) {
+            rs.lastResize = now;
+            if (rs.panel.resize) rs.panel.resize(newW, newH);
+          }
         }
         _prevPinchPos[i].copy(_pinchMid);
       }
@@ -301,6 +310,11 @@ export function updateInput(renderer, frame) {
           handDragStates[i] = null;
         }
         if (handResizeStates[i]) {
+          // Apply final resize at the last computed size
+          const rs = handResizeStates[i];
+          if (rs.pendingW && rs.pendingH && rs.panel.resize) {
+            rs.panel.resize(rs.pendingW, rs.pendingH);
+          }
           handResizeStates[i] = null;
         }
       }
@@ -353,6 +367,9 @@ function raycastMouse() {
   return intersects.length > 0 ? intersects[0] : null;
 }
 
+// Mouse resize state
+let mouseResizeState = null;
+
 function onPointerMove(e, canvas) {
   screenToNDC(e, canvas);
 
@@ -362,6 +379,29 @@ function onPointerMove(e, canvas) {
     const dy = mouse.y - dragState.startMouseY;
     dragState.panel.position.x = dragState.startPanelX + dx * dragState.scaleX;
     dragState.panel.position.y = dragState.startPanelY + dy * dragState.scaleY;
+    return;
+  }
+
+  // Mouse resize in progress
+  if (mouseResizeState) {
+    const rs = mouseResizeState;
+    const dx = mouse.x - rs.startMouseX;
+    const dy = mouse.y - rs.startMouseY;
+    let newW = rs.startWidth;
+    let newH = rs.startHeight;
+    if (rs.corner === 'br' || rs.corner === 'tr') newW += dx * rs.scaleX * 2;
+    if (rs.corner === 'bl' || rs.corner === 'tl') newW -= dx * rs.scaleX * 2;
+    if (rs.corner === 'tr' || rs.corner === 'tl') newH += dy * rs.scaleY * 2;
+    if (rs.corner === 'br' || rs.corner === 'bl') newH -= dy * rs.scaleY * 2;
+    newW = Math.max(0.15, Math.min(1.5, newW));
+    newH = Math.max(0.1, Math.min(1.5, newH));
+    rs.pendingW = newW;
+    rs.pendingH = newH;
+    const now = performance.now();
+    if (!rs.lastResize || now - rs.lastResize > 100) {
+      rs.lastResize = now;
+      if (rs.panel.resize) rs.panel.resize(newW, newH);
+    }
     return;
   }
 
@@ -377,20 +417,26 @@ function onPointerMove(e, canvas) {
         if (prevBtn?.userData.onHoverEnd) prevBtn.userData.onHoverEnd();
         const prevHandle = findDragHandle(prevHovered);
         if (prevHandle?.userData.onHoverEnd) prevHandle.userData.onHoverEnd();
+        const prevResize = findResizeHandle(prevHovered);
+        if (prevResize?.userData.onHoverEnd) prevResize.userData.onHoverEnd();
       }
       hoveredMap.set('mouse', hit);
       // Start hover on new
       const btn = findParentButton(hit);
       const handle = findDragHandle(hit);
-      if (handle?.userData.onHoverStart) handle.userData.onHoverStart();
+      const resizeH = findResizeHandle(hit);
+      if (resizeH?.userData.onHoverStart) resizeH.userData.onHoverStart();
+      else if (handle?.userData.onHoverStart) handle.userData.onHoverStart();
       else if (btn?.userData.onHoverStart) btn.userData.onHoverStart();
-      canvas.style.cursor = handle ? 'grab' : (btn ? 'pointer' : '');
+      canvas.style.cursor = resizeH ? 'nwse-resize' : (handle ? 'grab' : (btn ? 'pointer' : ''));
     }
   } else if (prevHovered) {
     const prevBtn = findParentButton(prevHovered);
     if (prevBtn?.userData.onHoverEnd) prevBtn.userData.onHoverEnd();
     const prevHandle = findDragHandle(prevHovered);
     if (prevHandle?.userData.onHoverEnd) prevHandle.userData.onHoverEnd();
+    const prevResize = findResizeHandle(prevHovered);
+    if (prevResize?.userData.onHoverEnd) prevResize.userData.onHoverEnd();
     hoveredMap.delete('mouse');
     canvas.style.cursor = '';
   }
@@ -402,14 +448,31 @@ function onPointerDown(e, canvas) {
   if (!result) return;
   const hit = result.object;
 
+  // Check if it's a resize handle first
+  const resizeH = findResizeHandle(hit);
+  if (resizeH?.userData.panel) {
+    const panel = resizeH.userData.panel;
+    mouseResizeState = {
+      panel,
+      corner: resizeH.userData.corner,
+      startMouseX: mouse.x,
+      startMouseY: mouse.y,
+      startWidth: panel.panelWidth,
+      startHeight: panel.panelHeight,
+      scaleX: Math.tan(THREE.MathUtils.degToRad(storedCamera.fov / 2)) * Math.abs(panel.position.z) * storedCamera.aspect,
+      scaleY: Math.tan(THREE.MathUtils.degToRad(storedCamera.fov / 2)) * Math.abs(panel.position.z),
+      pendingW: panel.panelWidth,
+      pendingH: panel.panelHeight,
+      lastResize: 0,
+    };
+    canvas.style.cursor = 'nwse-resize';
+    return;
+  }
+
   // Check if it's a drag handle
   const handle = findDragHandle(hit);
   if (handle?.userData.panel) {
     const panel = handle.userData.panel;
-
-    // Use the actual raycast hit point as the starting reference.
-    // Record the initial mouse NDC and panel position — we'll drag
-    // by projecting mouse delta into world-space movement.
     dragState = {
       panel,
       source: 'mouse',
@@ -417,9 +480,6 @@ function onPointerDown(e, canvas) {
       startMouseY: mouse.y,
       startPanelX: panel.position.x,
       startPanelY: panel.position.y,
-      // Scale factor: how much world-space movement per NDC unit.
-      // At z=-1.5 with fov=70, the visible height is ~2*1.5*tan(35deg)≈2.1
-      // NDC range is -1..1 (height 2), so scale ≈ 1.05
       scaleX: Math.tan(THREE.MathUtils.degToRad(storedCamera.fov / 2)) * Math.abs(panel.position.z) * storedCamera.aspect,
       scaleY: Math.tan(THREE.MathUtils.degToRad(storedCamera.fov / 2)) * Math.abs(panel.position.z),
     };
@@ -439,10 +499,15 @@ function onPointerDown(e, canvas) {
 
 function onPointerUp(canvas) {
   if (dragState && dragState.source === 'mouse') {
-    // Re-trigger hover end on the handle so it dims back
     const handle = dragState.panel.dragHandle;
     if (handle?.userData.onHoverEnd) handle.userData.onHoverEnd();
     dragState = null;
+    canvas.style.cursor = '';
+  }
+  if (mouseResizeState) {
+    const rs = mouseResizeState;
+    if (rs.panel.resize) rs.panel.resize(rs.pendingW, rs.pendingH);
+    mouseResizeState = null;
     canvas.style.cursor = '';
   }
 }
