@@ -42,7 +42,7 @@ These are the principles:
 
 ## Demo
 
-A demo will be left running at: https://MatriXR90sVibe.pages.dev
+A demo will be left running at: https://matrixr90svibe.pages.dev
 
 ## Getting Started With Matrix
 
