@@ -4,6 +4,11 @@ This project was born as a result of a desire to start building Spatial First/XR
 
 As part of XR First, seing your data spatially is the next step in getting the future we promise.  It requires a rethinking of how to present data.  And part of this is: we got real estate.  You have 360 degress of space in the XYZ plane.  
 
+<img width="535" height="621" alt="Image" src="https://github.com/user-attachments/assets/45c42605-2318-4a46-a4e6-98f129037547" />
+
+
+<img width="1278" height="590" alt="Image" src="https://github.com/user-attachments/assets/faff4cd6-2d8c-4180-bb84-7d44d1ea8ad3" />
+
 ## Motivation
 
 I attended a PDX Hacks hackathon today, and they were giving out credits.  I decided, let's build this dream project in 4 hours.  As it turned out, I had 1.5 hours by the time the system was set up and we were done with presentations from speakers.  
