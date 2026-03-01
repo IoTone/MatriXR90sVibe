@@ -14,8 +14,25 @@ let hands = [];
 let hoveredMap = new Map();
 let storedCamera = null;
 
-// Drag state
-let dragState = null; // { panel, offsetWorld, source }
+// Drag state (mouse or controller or hand)
+let dragState = null;
+
+// Hand drag state — separate per hand so both hands work independently
+const handDragStates = [null, null];
+
+// Resize state — per hand
+const handResizeStates = [null, null];
+
+// Finger poke state — track which button each fingertip is inside to avoid repeat fires
+const pokedButtons = [new Set(), new Set()];
+
+// Temp vectors for hand calculations
+const _indexPos = new THREE.Vector3();
+const _thumbPos = new THREE.Vector3();
+const _pinchMid = new THREE.Vector3();
+const _prevPinchPos = [new THREE.Vector3(), new THREE.Vector3()];
+const _pokeOrigin = new THREE.Vector3();
+const _pokeSphere = new THREE.Sphere(new THREE.Vector3(), 0.015);
 
 export function registerInteractable(mesh) {
   interactables.add(mesh);
@@ -91,6 +108,15 @@ function findDragHandle(obj) {
   return null;
 }
 
+function findResizeHandle(obj) {
+  let current = obj;
+  while (current) {
+    if (current.userData?.isResizeHandle) return current;
+    current = current.parent;
+  }
+  return null;
+}
+
 // --- XR Controller events ---
 
 function onSelectStart(source) {
@@ -161,40 +187,78 @@ export function updateInput(renderer, frame) {
     }
   }
 
-  // Hand pinch detection
+  // Hand tracking: pinch grab/drag/resize + finger poke
   if (frame) {
     const session = renderer.xr.getSession();
     const refSpace = renderer.xr.getReferenceSpace();
     if (!session || !refSpace) return;
 
-    for (let i = 0; i < hands.length; i++) {
+    // Build a list of hand input sources matched to our hands array
+    const handSources = [];
+    for (const src of session.inputSources) {
+      if (src.hand) handSources.push(src);
+    }
+
+    for (let i = 0; i < Math.min(handSources.length, hands.length); i++) {
       const hand = hands[i];
-      const inputSource = session.inputSources[i];
-      if (!inputSource?.hand) continue;
+      const inputSource = handSources[i];
 
-      const indexTip = inputSource.hand.get('index-finger-tip');
-      const thumbTip = inputSource.hand.get('thumb-tip');
-      if (!indexTip || !thumbTip) continue;
+      const indexTipJoint = inputSource.hand.get('index-finger-tip');
+      const thumbTipJoint = inputSource.hand.get('thumb-tip');
+      if (!indexTipJoint || !thumbTipJoint) continue;
 
-      const indexPose = frame.getJointPose(indexTip, refSpace);
-      const thumbPose = frame.getJointPose(thumbTip, refSpace);
+      const indexPose = frame.getJointPose(indexTipJoint, refSpace);
+      const thumbPose = frame.getJointPose(thumbTipJoint, refSpace);
       if (!indexPose || !thumbPose) continue;
 
       const ip = indexPose.transform.position;
       const tp = thumbPose.transform.position;
-      const dist = Math.sqrt(
-        (ip.x - tp.x) ** 2 + (ip.y - tp.y) ** 2 + (ip.z - tp.z) ** 2
-      );
+      _indexPos.set(ip.x, ip.y, ip.z);
+      _thumbPos.set(tp.x, tp.y, tp.z);
+      _pinchMid.lerpVectors(_indexPos, _thumbPos, 0.5);
 
+      const pinchDist = _indexPos.distanceTo(_thumbPos);
       const wasPinching = hand.userData.pinching || false;
-      const isPinching = dist < 0.025;
+      const isPinching = pinchDist < 0.025;
 
+      // --- PINCH START ---
       if (isPinching && !wasPinching) {
-        raycaster.ray.origin.set(ip.x, ip.y, ip.z);
+        // Raycast from pinch midpoint forward to find what we're grabbing
+        raycaster.ray.origin.copy(_pinchMid);
         raycaster.ray.direction.set(0, 0, -1);
         const intersects = raycaster.intersectObjects(targets, false);
+
         if (intersects.length > 0) {
           const hit = intersects[0].object;
+
+          // Check resize handle first
+          const resizeHandle = findResizeHandle(hit);
+          if (resizeHandle?.userData.panel) {
+            handResizeStates[i] = {
+              panel: resizeHandle.userData.panel,
+              corner: resizeHandle.userData.corner,
+              startPinch: _pinchMid.clone(),
+              startWidth: resizeHandle.userData.panel.panelWidth,
+              startHeight: resizeHandle.userData.panel.panelHeight,
+            };
+            _prevPinchPos[i].copy(_pinchMid);
+            hand.userData.pinching = true;
+            continue;
+          }
+
+          // Check drag handle
+          const handle = findDragHandle(hit);
+          if (handle?.userData.panel) {
+            const panel = handle.userData.panel;
+            const offset = new THREE.Vector3().subVectors(panel.position, _pinchMid);
+            handDragStates[i] = { panel, offset };
+            if (handle.userData.onHoverStart) handle.userData.onHoverStart();
+            _prevPinchPos[i].copy(_pinchMid);
+            hand.userData.pinching = true;
+            continue;
+          }
+
+          // Otherwise it's a button pinch-click
           const btn = findParentButton(hit);
           if (btn) {
             if (btn.userData.onSelectStart) btn.userData.onSelectStart();
@@ -205,7 +269,70 @@ export function updateInput(renderer, frame) {
         }
       }
 
+      // --- PINCH HOLD (drag / resize) ---
+      if (isPinching && wasPinching) {
+        if (handDragStates[i]) {
+          const ds = handDragStates[i];
+          ds.panel.position.copy(_pinchMid).add(ds.offset);
+        }
+        if (handResizeStates[i]) {
+          const rs = handResizeStates[i];
+          const delta = new THREE.Vector3().subVectors(_pinchMid, rs.startPinch);
+          // Scale factor based on corner
+          let newW = rs.startWidth;
+          let newH = rs.startHeight;
+          if (rs.corner === 'br' || rs.corner === 'tr') newW += delta.x * 2;
+          if (rs.corner === 'bl' || rs.corner === 'tl') newW -= delta.x * 2;
+          if (rs.corner === 'tr' || rs.corner === 'tl') newH += delta.y * 2;
+          if (rs.corner === 'br' || rs.corner === 'bl') newH -= delta.y * 2;
+          // Clamp to reasonable sizes
+          newW = Math.max(0.15, Math.min(1.5, newW));
+          newH = Math.max(0.1, Math.min(1.5, newH));
+          if (rs.panel.resize) rs.panel.resize(newW, newH);
+        }
+        _prevPinchPos[i].copy(_pinchMid);
+      }
+
+      // --- PINCH END ---
+      if (!isPinching && wasPinching) {
+        if (handDragStates[i]) {
+          const handle = handDragStates[i].panel.dragHandle;
+          if (handle?.userData.onHoverEnd) handle.userData.onHoverEnd();
+          handDragStates[i] = null;
+        }
+        if (handResizeStates[i]) {
+          handResizeStates[i] = null;
+        }
+      }
+
       hand.userData.pinching = isPinching;
+
+      // --- FINGER POKE (index finger tip proximity to buttons) ---
+      _pokeSphere.center.copy(_indexPos);
+      for (const mesh of targets) {
+        const btn = findParentButton(mesh);
+        if (!btn) continue;
+        // Get the world bounding box of the hit mesh
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        const bb = mesh.geometry.boundingBox.clone();
+        mesh.updateWorldMatrix(true, false);
+        bb.applyMatrix4(mesh.matrixWorld);
+        // Expand slightly for easier poking
+        bb.expandByScalar(0.005);
+
+        const isInside = bb.containsPoint(_indexPos);
+        const wasInside = pokedButtons[i].has(btn.uuid);
+
+        if (isInside && !wasInside) {
+          pokedButtons[i].add(btn.uuid);
+          if (btn.userData.onSelectStart) btn.userData.onSelectStart();
+          setTimeout(() => {
+            if (btn.userData.onSelectEnd) btn.userData.onSelectEnd();
+          }, 100);
+        } else if (!isInside && wasInside) {
+          pokedButtons[i].delete(btn.uuid);
+        }
+      }
     }
   }
 }

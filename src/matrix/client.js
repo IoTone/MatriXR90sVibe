@@ -91,12 +91,34 @@ async function fetchRoomName(roomId) {
   }
 }
 
-/** Check if a room is a space by reading its m.room.create state */
+/** Check if a room is a space — tries SDK first, then API */
 async function fetchRoomType(roomId) {
+  // 1. Try the SDK's synced data (most reliable after PREPARED)
+  if (matrixClient) {
+    const room = matrixClient.getRoom(roomId);
+    if (room) {
+      const sdkType = room.getType?.();
+      if (sdkType) {
+        console.log(`[matrix] Room ${roomId} type from SDK: ${sdkType}`);
+        return sdkType;
+      }
+      // Also check the create event content directly
+      const createEvent = room.currentState?.getStateEvents('m.room.create', '');
+      const createType = createEvent?.getContent?.()?.type;
+      if (createType) {
+        console.log(`[matrix] Room ${roomId} type from SDK create event: ${createType}`);
+        return createType;
+      }
+    }
+  }
+
+  // 2. Fall back to API
   try {
     const ev = await matrixFetch(`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.create/`);
+    console.log(`[matrix] Room ${roomId} create event from API:`, JSON.stringify(ev));
     return ev.type || null;
-  } catch {
+  } catch (err) {
+    console.warn(`[matrix] Could not fetch room type for ${roomId}:`, err.message);
     return null;
   }
 }
@@ -104,12 +126,19 @@ async function fetchRoomType(roomId) {
 export async function loadSpaces() {
   if (!accessToken) return;
 
-  // 1. Get joined rooms
+  // 1. Get joined rooms from API
   const { joined_rooms } = await matrixFetch('/_matrix/client/v3/joined_rooms');
   console.log(`[matrix] Server reports ${joined_rooms.length} joined rooms`);
 
+  // 2. Also check SDK's synced rooms (may know about rooms the API list misses)
+  const sdkRooms = matrixClient ? matrixClient.getRooms() : [];
+  const sdkRoomIds = new Set(sdkRooms.map((r) => r.roomId));
+  const allRoomIds = new Set([...joined_rooms, ...sdkRoomIds]);
+  console.log(`[matrix] Combined room IDs: ${allRoomIds.size} (API: ${joined_rooms.length}, SDK: ${sdkRooms.length})`);
+
+  // 3. Resolve name and type for each room
   const joinedInfos = await Promise.all(
-    joined_rooms.map(async (roomId) => {
+    [...allRoomIds].map(async (roomId) => {
       const [name, type] = await Promise.all([fetchRoomName(roomId), fetchRoomType(roomId)]);
       return { id: roomId, name, type };
     })
@@ -118,10 +147,11 @@ export async function loadSpaces() {
   const joinedSpaces = joinedInfos.filter((r) => r.type === 'm.space');
   const joinedRooms = joinedInfos.filter((r) => r.type !== 'm.space');
 
-  joinedSpaces.forEach((s) => console.log(`[matrix] joined space: ${s.name} (${s.id})`));
-  joinedRooms.forEach((r) => console.log(`[matrix] joined room: ${r.name} (${r.id})`));
+  console.log(`[matrix] Classified: ${joinedSpaces.length} spaces, ${joinedRooms.length} rooms`);
+  joinedSpaces.forEach((s) => console.log(`[matrix]   space: ${s.name} (${s.id})`));
+  joinedRooms.forEach((r) => console.log(`[matrix]   room: ${r.name} (${r.id})`));
 
-  // 2. Fetch public room directory to find browsable spaces
+  // 4. Fetch public room directory to find browsable spaces
   let publicSpaces = [];
   try {
     const dir = await matrixFetch('/_matrix/client/v3/publicRooms');
@@ -129,15 +159,12 @@ export async function loadSpaces() {
     publicSpaces = publicEntries
       .filter((r) => r.room_type === 'm.space')
       .map((r) => ({ id: r.room_id, name: r.name || r.room_id }));
-    const publicRooms = publicEntries
-      .filter((r) => r.room_type !== 'm.space');
-    console.log(`[matrix] Public directory: ${publicEntries.length} entries, ${publicSpaces.length} spaces, ${publicRooms.length} rooms`);
-    publicSpaces.forEach((s) => console.log(`[matrix] public space: ${s.name} (${s.id})`));
+    console.log(`[matrix] Public directory: ${publicEntries.length} entries, ${publicSpaces.length} spaces`);
   } catch (err) {
     console.warn('[matrix] Could not fetch public rooms:', err);
   }
 
-  // 3. Merge: joined spaces + public spaces (deduplicated)
+  // 5. Merge: joined spaces + public spaces (deduplicated)
   const seenIds = new Set();
   const allSpaces = [];
   for (const s of [...joinedSpaces, ...publicSpaces]) {
@@ -146,6 +173,8 @@ export async function loadSpaces() {
       allSpaces.push({ id: s.id, name: s.name });
     }
   }
+
+  console.log(`[matrix] Final space list: ${allSpaces.length} spaces`);
 
   const spaceList = [
     { id: '__all__', name: 'All Rooms' },
@@ -156,8 +185,12 @@ export async function loadSpaces() {
   // Stash joined (non-space) rooms for "All Rooms"
   store.set('_allRooms', joinedRooms.map((r) => ({ id: r.id, name: r.name })));
 
-  // Auto-select "All Rooms" so the user immediately sees their joined rooms
-  selectSpace('__all__');
+  // Auto-select first actual space if available, otherwise "All Rooms"
+  if (allSpaces.length > 0) {
+    selectSpace(allSpaces[0].id);
+  } else {
+    selectSpace('__all__');
+  }
 }
 
 export async function selectSpace(spaceId) {

@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { createTitle } from './text-helpers.js';
-import { registerInteractable } from '../xr/input.js';
+import { registerInteractable, unregisterInteractable } from '../xr/input.js';
 
 // Neon color palette — each panel gets a unique accent
 const NEON_ACCENTS = [0xff00ff, 0x00ffff, 0x39ff14, 0xff6ec7];
@@ -126,6 +126,79 @@ export class Panel extends THREE.Group {
       0.003
     );
     this.add(this.content);
+
+    // --- Resize handles at corners ---
+    this._resizeHandles = [];
+    this._buildResizeHandles(width, height);
+  }
+
+  _buildResizeHandles(w, h) {
+    const size = 0.025;
+    const corners = [
+      { key: 'tl', x: -w / 2, y: h / 2 },
+      { key: 'tr', x: w / 2, y: h / 2 },
+      { key: 'bl', x: -w / 2, y: -h / 2 },
+      { key: 'br', x: w / 2, y: -h / 2 },
+    ];
+    for (const c of corners) {
+      const geo = new THREE.PlaneGeometry(size, size);
+      const mat = new THREE.MeshBasicMaterial({
+        color: this.neonColor,
+        transparent: true,
+        opacity: 0.0,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(c.x, c.y, 0.004);
+      mesh.userData.isResizeHandle = true;
+      mesh.userData.corner = c.key;
+      mesh.userData.panel = this;
+      mesh.userData.onHoverStart = () => { mat.opacity = 0.6; };
+      mesh.userData.onHoverEnd = () => { mat.opacity = 0.0; };
+      this.add(mesh);
+      registerInteractable(mesh);
+      this._resizeHandles.push(mesh);
+    }
+  }
+
+  resize(newWidth, newHeight) {
+    // Remove old resize handles
+    for (const h of this._resizeHandles) {
+      unregisterInteractable(h);
+      this.remove(h);
+      h.geometry.dispose();
+      h.material.dispose();
+    }
+    this._resizeHandles = [];
+
+    this.panelWidth = newWidth;
+    this.panelHeight = newHeight;
+
+    const bodyH = newHeight - HANDLE_HEIGHT;
+
+    // Update background
+    this.background.geometry.dispose();
+    this.background.geometry = new THREE.PlaneGeometry(newWidth, bodyH);
+    this.background.position.set(0, -HANDLE_HEIGHT / 2, 0);
+
+    // Update drag handle
+    this.dragHandle.geometry.dispose();
+    this.dragHandle.geometry = new THREE.PlaneGeometry(newWidth, HANDLE_HEIGHT);
+    this.dragHandle.position.set(0, newHeight / 2 - HANDLE_HEIGHT / 2, 0.005);
+
+    // Update title position
+    if (this.titleText) {
+      this.titleText.position.set(0, this.dragHandle.position.y, 0.008);
+    }
+
+    // Update content container position
+    this.content.position.set(
+      -newWidth / 2 + 0.02,
+      newHeight / 2 - HANDLE_HEIGHT - 0.015,
+      0.003
+    );
+
+    // Rebuild resize handles
+    this._buildResizeHandles(newWidth, newHeight);
   }
 
   _buildNeonBorder(w, h) {
