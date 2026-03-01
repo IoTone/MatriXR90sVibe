@@ -1,3 +1,6 @@
+// Copyright 2026 IoTone, Inc.
+// This source code is licensed under the MIT License (see LICENSE.txt).
+
 import { Panel } from './panel.js';
 import { createButton } from './button.js';
 import { registerInteractable, unregisterInteractable } from '../xr/input.js';

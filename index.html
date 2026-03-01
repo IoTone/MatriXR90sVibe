@@ -3,16 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AR Matrix Chat</title>
+  <title>MatriXR90S</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="login-screen">
-    <h1>AR Matrix Chat</h1>
+    <div id="synthwave-bg"></div>
+    <h1>MatriXR90S</h1>
     <form id="login-form">
-      <input type="url" id="homeserver" value="https://t.rt.tl" placeholder="Homeserver URL" required />
-      <input type="text" id="username" placeholder="Username" required />
-      <input type="password" id="password" placeholder="Password" required />
+      <label for="homeserver">Homeserver URL</label>
+      <input type="url" id="homeserver" value="https://t.rt.tl" required />
+      <label for="username">Username</label>
+      <input type="text" id="username" required />
+      <label for="password">Password</label>
+      <input type="password" id="password" required />
       <button type="submit" id="login-btn">Login</button>
       <p id="login-status"></p>
     </form>

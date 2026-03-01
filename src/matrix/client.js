@@ -1,11 +1,18 @@
+// Copyright 2026 IoTone, Inc.
+// This source code is licensed under the MIT License (see LICENSE.txt).
+
 import { createClient, ClientEvent, RoomEvent } from 'matrix-js-sdk';
 import { store } from '../state/store.js';
+import { playMessageNotification } from '../ui/notification.js';
 
 const DEFAULT_HOMESERVER = 'https://t.rt.tl';
 
 let matrixClient = null;
 let resolvedBaseUrl = null;
 let accessToken = null;
+
+// Pagination state per room
+const roomPagination = new Map(); // roomId -> { prevBatch, hasMore }
 
 /**
  * Resolve the baseUrl for the Matrix SDK.
@@ -58,6 +65,7 @@ export async function login(homeserver, user, password) {
     matrixClient.startClient();
   });
 
+  store.set('_userId', response.user_id);
   store.set('loggedIn', true);
   store.set('synced', true);
 
@@ -162,7 +170,12 @@ export async function selectSpace(spaceId) {
   // Virtual "All Rooms" — use the cached room list
   if (spaceId === '__all__') {
     const allRooms = store.get('_allRooms') || [];
+    console.log('[matrix] selectSpace(__all__) → rooms:', allRooms.map((r) => r.name));
     store.set('rooms', allRooms);
+    // Auto-select first room so messages load immediately
+    if (allRooms.length > 0) {
+      selectRoom(allRooms[0].id);
+    }
     return;
   }
 
@@ -177,15 +190,22 @@ export async function selectSpace(spaceId) {
   }
 }
 
+const PAGE_SIZE = 20;
+
 export async function selectRoom(roomId) {
   if (!matrixClient) return;
+  console.log(`[matrix] selectRoom(${roomId})`);
   store.set('selectedRoomId', roomId);
   store.set('messages', []);
+
+  // Reset pagination for this room
+  roomPagination.delete(roomId);
 
   // Join the room if we're not already a member
   try {
     const room = matrixClient.getRoom(roomId);
     const membership = room?.getMyMembership?.();
+    console.log(`[matrix] Current membership for ${roomId}: ${membership}`);
     if (membership !== 'join') {
       console.log(`[matrix] Joining room ${roomId}…`);
       await matrixClient.joinRoom(roomId);
@@ -195,24 +215,81 @@ export async function selectRoom(roomId) {
     console.error(`[matrix] Failed to join room ${roomId}:`, err);
   }
 
-  // Fetch recent messages via the API (works even if SDK cache is empty)
+  // Fetch initial page of messages
+  await fetchMessages(roomId, false);
+}
+
+/**
+ * Fetch a page of messages for a room.
+ * @param {string} roomId
+ * @param {boolean} older - true to load older messages (prepend), false for initial load
+ * @returns {boolean} true if there are more older messages to load
+ */
+async function fetchMessages(roomId, older) {
+  const encodedRoom = encodeURIComponent(roomId);
+  let url = `/_matrix/client/v3/rooms/${encodedRoom}/messages?dir=b&limit=${PAGE_SIZE}`;
+
+  if (older) {
+    const pag = roomPagination.get(roomId);
+    if (!pag || !pag.hasMore) {
+      console.log('[matrix] No more older messages to load');
+      return false;
+    }
+    url += `&from=${encodeURIComponent(pag.prevBatch)}`;
+  }
+
+  console.log(`[matrix] Fetching messages: ${url}`);
   try {
-    const data = await matrixFetch(
-      `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=30`
-    );
-    const messages = (data.chunk || [])
-      .filter((e) => e.type === 'm.room.message')
+    const data = await matrixFetch(url);
+    console.log(`[matrix] Raw response: ${data.chunk?.length} events, end: ${data.end}`);
+
+    const newMessages = (data.chunk || [])
+      .filter((e) => e.type === 'm.room.message' && e.content?.body)
       .map((e) => ({
         sender: e.sender,
-        body: e.content?.body || '',
+        body: e.content.body,
         ts: e.origin_server_ts,
       }))
-      .reverse(); // API returns newest-first with dir=b, we want chronological
-    console.log(`[matrix] Loaded ${messages.length} messages from ${roomId}`);
-    store.set('messages', messages);
+      .reverse(); // dir=b returns newest-first, reverse to chronological
+
+    // Update pagination token
+    const hasMore = !!(data.end && data.chunk && data.chunk.length > 0);
+    roomPagination.set(roomId, { prevBatch: data.end, hasMore });
+
+    // Merge into store
+    const current = store.get('messages') || [];
+    if (older) {
+      // Prepend older messages
+      store.set('messages', [...newMessages, ...current]);
+    } else {
+      store.set('messages', newMessages);
+    }
+
+    console.log(`[matrix] Loaded ${newMessages.length} messages (total now: ${store.get('messages').length})`);
+    return hasMore;
   } catch (err) {
     console.error(`[matrix] Failed to load messages for ${roomId}:`, err);
+    return false;
   }
+}
+
+/**
+ * Load older messages for the currently selected room.
+ * Called by the chat panel when scrolling up.
+ * @returns {boolean} true if more pages available
+ */
+export async function loadOlderMessages() {
+  const roomId = store.get('selectedRoomId');
+  if (!roomId) return false;
+  return fetchMessages(roomId, true);
+}
+
+/** Check if there are more older messages to load */
+export function hasOlderMessages() {
+  const roomId = store.get('selectedRoomId');
+  if (!roomId) return false;
+  const pag = roomPagination.get(roomId);
+  return pag?.hasMore ?? false;
 }
 
 function listenForMessages() {
@@ -228,6 +305,7 @@ function listenForMessages() {
       ts: event.getTs(),
     };
     store.set('messages', [...current, msg]);
+    playMessageNotification();
   });
 }
 
@@ -257,4 +335,28 @@ export async function sendMessage(text) {
 
 export function getClient() {
   return matrixClient;
+}
+
+export function getUserId() {
+  return matrixClient?.getUserId?.() || store.get('_userId') || '';
+}
+
+export async function logout() {
+  try {
+    if (matrixClient) {
+      matrixClient.stopClient();
+      await matrixClient.logout(true).catch(() => {});
+    }
+  } catch { /* ignore */ }
+  matrixClient = null;
+  accessToken = null;
+  roomPagination.clear();
+  store.set('loggedIn', false);
+  store.set('synced', false);
+  store.set('spaces', []);
+  store.set('rooms', []);
+  store.set('messages', []);
+  store.set('selectedSpaceId', null);
+  store.set('selectedRoomId', null);
+  store.set('xrActive', false);
 }

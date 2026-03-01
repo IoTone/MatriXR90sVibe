@@ -1,11 +1,15 @@
+// Copyright 2026 IoTone, Inc.
+// This source code is licensed under the MIT License (see LICENSE.txt).
+
 import { store } from './state/store.js';
 import { login, loadSpaces, sendMessage } from './matrix/client.js';
-import { initThree, createARButton, startRenderLoop, scene } from './xr/setup.js';
+import { initThree, createARButton, startRenderLoop, scene, camera } from './xr/setup.js';
 import { initInput, updateInput } from './xr/input.js';
 import { SpacePanel } from './ui/space-panel.js';
 import { RoomPanel } from './ui/room-panel.js';
 import { ChatPanel } from './ui/chat-panel.js';
 import { KeyboardPanel } from './ui/keyboard-panel.js';
+import { UserPanel } from './ui/user-panel.js';
 import { renderer } from './xr/setup.js';
 
 // --- Prefill login form from env ---
@@ -35,8 +39,12 @@ loginForm.addEventListener('submit', async (e) => {
   try {
     await login(homeserver, username, password);
     loginStatus.textContent = 'Synced! Ready for AR.';
-    loginForm.style.display = 'none';
-    setupAR();
+    // Trigger glitch fade-out animation
+    document.getElementById('login-screen').classList.add('fade-out');
+    setTimeout(() => {
+      loginForm.style.display = 'none';
+      setupAR();
+    }, 1000);
   } catch (err) {
     loginStatus.textContent = `Error: ${err.message}`;
     loginBtn.disabled = false;
@@ -65,13 +73,34 @@ overlayInput.addEventListener('keydown', (e) => {
 function setupAR() {
   initThree();
   const arButton = createARButton();
-  initInput(renderer, scene);
+  initInput(renderer, scene, camera);
+
+  const panels = [];
+
+  function teardownPanels() {
+    panels.forEach((p) => scene.remove(p));
+    panels.length = 0;
+  }
+
+  function handleLogout() {
+    console.log('[main] Logout — returning to login screen');
+    // End XR session if active
+    const session = renderer.xr.getSession();
+    if (session) session.end().catch(() => {});
+    // Remove all panels from scene
+    teardownPanels();
+    // Show login form again
+    loginForm.style.display = '';
+    loginBtn.disabled = false;
+    loginStatus.textContent = 'Logged out.';
+  }
 
   // Create panels
   const spacePanel = new SpacePanel();
   const roomPanel = new RoomPanel();
   const chatPanel = new ChatPanel();
   const keyboardPanel = new KeyboardPanel();
+  const userPanel = new UserPanel(handleLogout);
 
   // Position panels relative to headset origin (y=0 is eye level on most headsets)
   // Slightly below eye level so user looks down comfortably
@@ -95,10 +124,16 @@ function setupAR() {
   keyboardPanel.rotation.x = -0.4;
   keyboardPanel.rotation.y = -0.15;
 
+  // User panel — far right
+  userPanel.position.set(0.9, panelY, -1.5);
+  userPanel.rotation.y = -0.35;
+
   scene.add(spacePanel);
   scene.add(roomPanel);
   scene.add(chatPanel);
   scene.add(keyboardPanel);
+  scene.add(userPanel);
+  panels.push(spacePanel, roomPanel, chatPanel, keyboardPanel, userPanel);
 
   // Debug logging
   store.on('spaces', (spaces) => console.log('Spaces:', spaces));

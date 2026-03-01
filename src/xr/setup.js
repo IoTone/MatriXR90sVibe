@@ -1,3 +1,6 @@
+// Copyright 2026 IoTone, Inc.
+// This source code is licensed under the MIT License (see LICENSE.txt).
+
 import * as THREE from 'three';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
 import { store } from '../state/store.js';
@@ -8,6 +11,8 @@ export function initThree() {
   scene = new THREE.Scene();
 
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+  // Default position for desktop viewing (looking at panels at z=-1.5)
+  camera.position.set(0, 0, 0);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(window.devicePixelRatio);

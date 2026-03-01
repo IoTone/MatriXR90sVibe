@@ -1,3 +1,6 @@
+// Copyright 2026 IoTone, Inc.
+// This source code is licensed under the MIT License (see LICENSE.txt).
+
 import * as THREE from 'three';
 import { Panel } from './panel.js';
 import { createButton } from './button.js';
@@ -75,8 +78,19 @@ export class KeyboardPanel extends Panel {
       this.#buffer += ' ';
     } else if (key === 'SEND') {
       if (this.#buffer.trim()) {
-        sendMessage(this.#buffer.trim());
+        const msg = this.#buffer.trim();
+        console.log('[keyboard] Sending:', msg);
+        sendMessage(msg);
         this.#buffer = '';
+        // Flash "SENT" confirmation
+        this.#display.text = '-- SENT --';
+        this.#display.color = 0x39ff14;
+        this.#display.sync();
+        setTimeout(() => {
+          this.#display.color = 0xffffff;
+          this.#updateDisplay();
+        }, 800);
+        return; // skip normal display update
       }
     } else {
       this.#buffer += key.toLowerCase();

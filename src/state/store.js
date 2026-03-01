@@ -1,3 +1,6 @@
+// Copyright 2026 IoTone, Inc.
+// This source code is licensed under the MIT License (see LICENSE.txt).
+
 class Store extends EventTarget {
   #state = {
     loggedIn: false,
