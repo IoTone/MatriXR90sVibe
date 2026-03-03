@@ -16,22 +16,42 @@ const roomPagination = new Map(); // roomId -> { prevBatch, hasMore }
 
 /**
  * Resolve the baseUrl for the Matrix SDK.
- * When the user targets the default homeserver, route through Vite's
- * dev proxy (same origin) to avoid CORS issues.
+ * In local dev (localhost), route through the Vite proxy to avoid CORS.
+ * In production, discover the real Matrix client API via .well-known.
  */
-function resolveBaseUrl(homeserver) {
+async function resolveBaseUrl(homeserver) {
+  const isLocalDev = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
+  if (isLocalDev) {
+    try {
+      const hs = new URL(homeserver);
+      const def = new URL(DEFAULT_HOMESERVER);
+      if (hs.host === def.host) {
+        return window.location.origin; // hits Vite proxy → /_matrix → homeserver
+      }
+    } catch { /* fall through */ }
+  }
+
+  // In production or for non-default servers, discover the client API URL
   try {
-    const hs = new URL(homeserver);
-    const def = new URL(DEFAULT_HOMESERVER);
-    if (hs.host === def.host) {
-      return window.location.origin; // hits Vite proxy → /_matrix → homeserver
+    const wellKnown = await fetch(`${homeserver}/.well-known/matrix/client`);
+    if (wellKnown.ok) {
+      const data = await wellKnown.json();
+      const base = data['m.homeserver']?.base_url;
+      if (base) {
+        console.log(`[matrix] Resolved ${homeserver} → ${base} via .well-known`);
+        return base.replace(/\/$/, '');
+      }
     }
-  } catch { /* fall through */ }
+  } catch (err) {
+    console.warn('[matrix] .well-known lookup failed:', err.message);
+  }
+
   return homeserver;
 }
 
 export async function login(homeserver, user, password) {
-  resolvedBaseUrl = resolveBaseUrl(homeserver);
+  resolvedBaseUrl = await resolveBaseUrl(homeserver);
 
   // Create a temporary client to authenticate
   const tempClient = createClient({ baseUrl: resolvedBaseUrl });
