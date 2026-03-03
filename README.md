@@ -31,6 +31,9 @@ These are the principles:
 - Use audio notifications
 - The 90s had a nice vibe, use it
 
+Claude API Opus 4.2 was used to generate a working design.  I did all of the human testing.  Mostly it got the "look" right, and failed on a lot of usability things.  API wise, it needed to figure out problems related to CORS and my deployment.
+
+
 ## Build
 
 - npm run dev
